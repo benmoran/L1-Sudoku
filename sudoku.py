@@ -1,9 +1,23 @@
 """
-Linear systems sudoku solver from 
-http://www.it.uu.se/katalog/praba420/Sudoku.pdf
+Copyright (c) 2009, Ben Moran
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+    * Neither the name of Ben Moran nor the names of any contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+-- This is a re-implementation of the "Linear systems Sudoku solver" from http://www.it.uu.se/katalog/praba420/Sudoku.pdf
 """
  
 from math import sqrt
+from cvxmod import problem, minimize, optvar, ones, speye, diag
+from cvxmod.atoms import norm1
+
 import cvxopt
 import cvxopt.solvers
 matrix = cvxopt.base.matrix
@@ -31,9 +45,9 @@ def concathoriz(m1, m2):
 Concatenate two matrices horizontally.
 
 >>> print concathoriz(eye(3),eye(3))
-[ 1.00e+00  0.00e+00  0.00e+00  1.00e+00  0.00e+00  0.00e+00]
-[ 0.00e+00  1.00e+00  0.00e+00  0.00e+00  1.00e+00  0.00e+00]
-[ 0.00e+00  0.00e+00  1.00e+00  0.00e+00  0.00e+00  1.00e+00]
+[   1.000    0.000    0.000    1.000    0.000    0.000]
+[   0.000    1.000    0.000    0.000    1.000    0.000]
+[   0.000    0.000    1.000    0.000    0.000    1.000]
 <BLANKLINE>
 """
     r1, c1 = m1.size
@@ -44,9 +58,22 @@ Concatenate two matrices horizontally.
 
 def concatvert(m1,m2):
     """
-Concatenate two matrices horizontally.
+Concatenate two matrices vertically.
 
-"""    
+>>> print concatvert(eye(3),eye(3))
+[   1.000    0.000    0.000]
+[   0.000    1.000    0.000]
+[   0.000    0.000    1.000]
+[   1.000    0.000    0.000]
+[   0.000    1.000    0.000]
+[   0.000    0.000    1.000]
+<BLANKLINE>
+"""
+    r1, c1 = m1.size
+    r2, c2 = m2.size
+    if  c1 != c2:
+        raise TypeError('Widths don''t match, %d and %d' % (c1, c2))
+    
     return concathoriz(m1.trans(), m2.trans()).trans()
 
 def sample():
@@ -79,16 +106,58 @@ def sample_hard():
         "5..2....."
         "1.4......")
 
+def sample_tricky():
+    """
+    Return a "tricky" Problem instance from the paper.
+    """
+    return Problem(
+        "..3..9.81"
+        "...2...6."
+        "5...1.7.."
+        "89......."
+        "..56.12.."
+        ".......37"
+        "..9..2..8"
+        ".7...4..."
+        "25.8..6..")
+
+
+def sample_moderate():
+    """
+    Return a "moderate" Problem instance from the paper.
+    """
+    return Problem(
+        "..5...7.."
+        "93.5.4..."
+        "84.....3."
+        "6...2.4.."
+        "5...9...8"
+        "..9.8...1"
+        ".5.....7."
+        "...3.7.86"
+        "..1...9..")
+
 class Problem:
     """
     Translates between different representations of a Sudoku problem.
     """
+    def __str__(self):
+        return unicode(self)
+    
     def __unicode__(self):
         s = ""
+        boxsize = self.get_box_size()
+        if boxsize:
+            inserts = range(self.N - boxsize, 0, -boxsize)
         for i in xrange(0,self.N):
             row = self.entries[i*self.N:(i+1)*self.N]
             row = [unicode(e) if e else '_' for e in row]
+            if boxsize:
+                for ix in inserts:
+                    row.insert(ix, "|")
             s += " ".join(row) + "\n"
+            if boxsize and (i+1) in inserts:
+                s += "+-".join(["--" * boxsize] * boxsize) + "\n"
         return s
 
     def __init__(self, entries, N=9):
@@ -135,7 +204,7 @@ class Problem:
             M = concatvert(M, self.get_row_digits_matrix())
         if col_digits or test_all:
             M = concatvert(M, self.get_col_digits_matrix())
-        if box_digits or test_all:
+        if self.get_box_size() and (box_digits or test_all):
             M = concatvert(M, self.get_box_digits_matrix())
         if clues or test_all:
             M = concatvert(M, self.get_clues_matrix())
@@ -195,6 +264,15 @@ class Problem:
                 M[ N*ix: N*ix+N , N*cell : N*(cell+1) ] = eye(N)
         return M
 
+    def get_box_size(self):
+        """
+        Return the size of sub-boxes, sqrt(N), if applicable.
+        """        
+        boxsize = int(sqrt(self.N))
+        if boxsize > 1 and self.N == boxsize**2:            
+            return boxsize
+        return 0
+
     def get_box_defs(self):
         """
         Return the numbers of cells in the NxN grid
@@ -202,7 +280,7 @@ class Problem:
         size sqrt(N)xsqrt(N)
         """
         N = self.N
-        boxsize = int(sqrt(N))
+        boxsize = self.get_box_size()
         boxes = []
         for boxnum in xrange(N):
             bx = boxnum/boxsize
@@ -268,17 +346,26 @@ class Problem:
         M = self.matrix(**kwargs)
         return M * self.to_indicator_vector()
 
-
-    def solve(self, **kwargs):
+    def solve(self, solvefunc=None, **kwargs):
         """
         Return a new Problem instance with
         best attempt at solution, using plain L1.
         """
         M = self.matrix()
         ones = ones_v(M.size[0])
-        v = solve_plain_l1(M,ones)
-        return Problem.from_indicator_vector(v)
-
+        if solvefunc is None:
+            #solvefunc = solve_iter_reweighted_l1
+            #solvefunc = solve_plain_l1
+            solvefunc = solve_plain_l1_cvxmod
+            solvefunc = solve_rw_l1_cvxmod
+        #v = solve_plain_l1(M,ones)
+        v = solvefunc(M,ones)
+        result = Problem.from_indicator_vector(v)
+        if not all([e==1 for e in result.get_result()]):
+            print "Failed"
+        else:
+            print "OK"
+        return result
 
 def solve_plain_l1(A, y, solver='glpk'):
     """
@@ -301,3 +388,63 @@ def solve_plain_l1(A, y, solver='glpk'):
     
     return v
 
+
+def solve_iter_reweighted_l1(A, y, solver='glpk', iters=4):
+    """
+    Find x with min l1 such that Ax=y,
+    using iteratively reweighted l1 minimization
+    """
+    #Reweighted l1 approach from Candes Wakin and Boyd Enhancing sparsity by reweighted l1 minimization. J. Fourier Anal. Appl., 14 877-905. and http://www.acm.caltech.edu/~emmanuel/papers/rwl1.pdf:
+
+    ## from http://sites.google.com/site/stephanegchretien/alternatingl1
+    n = A.size[1]
+    
+    c0 = ones_v(2*n)
+    
+    G1 = concathoriz(A,-A)
+    G2 = concathoriz(-A,A)
+    G3 = -eye(2*n)
+    G = reduce(concatvert, [G1,G2,G3])
+    hh = reduce(concatvert, [y, -y, zeros_v(2*n)])
+
+    sol = cvxopt.solvers.lp(c0, G, hh, solver=solver)
+    
+    doublexlone = sol['x'][:2*n] #.trans()[0]
+    xlone = concathoriz(eye(n),-eye(n)) * doublexlone
+
+    xtmp = doublexlone
+    for l in range(iters):
+        #c1u = (abs(doublexlone)+.1)**-1
+        c1u = (abs(xtmp)+.1)**-1 # should it be this?
+        sol = cvxopt.solvers.lp(c1u, G, hh)
+        solstixdt =  sol['x'][:2*n] #.trans()[0]
+        xlone = concathoriz(eye(n),-eye(n)) * solstixdt
+        xtmp = solstixdt        
+
+    v = sol['x'][:n]
+    
+    return v
+
+def solve_plain_l1_cvxmod(A, y):
+    x = optvar('x', A.size[1])
+    p = problem(minimize(norm1(x)), [A*x == y])
+    p.solve(quiet=True)
+    return x.value
+
+def solve_rw_l1_cvxmod(A, y, iters=6):
+    W = speye(A.size[1])
+    x = optvar('x', A.size[1])
+    epsilon = 0.5
+    for i in range(iters):
+        last_x = matrix(x.value) if x.value else None
+        p = problem(minimize(norm1(W*x)), [A*x == y])
+        p.solve(quiet=True)
+        ww = abs(x.value) + epsilon
+        W = diag(matrix([1/w for w in ww]))
+        if last_x:
+            err = ( (last_x - x.value).T * (last_x - x.value) )[0]
+            if err < 1e-4:
+                break
+    return x.value
+
+# TODO: IRLS, Alternating L1

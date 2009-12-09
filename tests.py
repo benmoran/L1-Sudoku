@@ -153,6 +153,15 @@ class ProblemTest(unittest.TestCase):
         self.assertEqual(self.N, self.sudoku.N)
         self.assertTrue(len(unicode(self.sudoku)) > self.sudoku.N **2)
 
+    def test_box_size(self):
+        """
+        Test we get correct boxsize if N is square and large enough.
+        """
+        self.assertEqual(3, Problem("."*81,N=9).get_box_size())
+        self.assertEqual(2, Problem("."*16,N=4).get_box_size())
+        self.assertEqual(0, Problem("."*4,N=2).get_box_size())
+        self.assertEqual(0, Problem("."*100,N=10).get_box_size())
+
     def test_nentries(self):
         """
         Check the Problem correctly counts the number
