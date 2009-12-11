@@ -428,7 +428,7 @@ def solve_iter_reweighted_l1(A, y, solver='glpk', iters=4):
 def solve_plain_l1_cvxmod(A, y):
     x = optvar('x', A.size[1])
     p = problem(minimize(norm1(x)), [A*x == y])
-    p.solve(quiet=True)
+    p.solve(quiet=True, solver='glpk')
     return x.value
 
 def solve_rw_l1_cvxmod(A, y, iters=6):
@@ -438,7 +438,7 @@ def solve_rw_l1_cvxmod(A, y, iters=6):
     for i in range(iters):
         last_x = matrix(x.value) if x.value else None
         p = problem(minimize(norm1(W*x)), [A*x == y])
-        p.solve(quiet=True)
+        p.solve(quiet=True, cvxoptsolver='glpk')
         ww = abs(x.value) + epsilon
         W = diag(matrix([1/w for w in ww]))
         if last_x:

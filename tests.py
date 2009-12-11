@@ -339,6 +339,7 @@ class ProblemTest(unittest.TestCase):
         b = ones_v(2)
         x = solve_plain_l1(M, b)
         self.assertEqual(tuple(b), tuple(M*x))
+
          
 def count_success():
     results = {}
