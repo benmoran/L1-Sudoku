@@ -99,7 +99,8 @@ class KillerProblemTest(unittest.TestCase):
                   "I":6 }
 
         self.N = 9
-        self.killer = KillerProblem(regions="aabccddee"
+        self.killer = KillerProblem(regions=
+                                    "aabccddee"
                                     "ffbgchhhh"
                                     "ijjgkklll"
                                     "iimmknnlo"
